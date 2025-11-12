@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"surge/internal/util"
+	"github.com/vfaronov/httpheader"
 )
 
 type Downloader struct {
@@ -67,15 +68,13 @@ func (d *Downloader) singleDownload(ctx context.Context, rawurl, outPath string,
 	}
 
 	filename := filepath.Base(outPath)
-	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
-		// naive parsing: look for filename="..."
-		if idx := strings.Index(cd, "filename="); idx != -1 {
-			name := cd[idx+len("filename="):]
-			name = strings.Trim(name, `"' `)
-			if name != "" {
-				filename = filepath.Base(name)
-			}
-		}
+
+	// Try to extract filename from Content-Disposition header
+	if dtype, name, err := httpheader.ContentDisposition(resp.Header); err == nil && name != "" {
+    	filename = filepath.Base(name)
+	} else {
+		// Fallback: Use download.bin for now
+		filename = "download.bin"
 	}
 
 	outDir := filepath.Dir(outPath)
