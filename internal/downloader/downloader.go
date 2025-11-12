@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"surge/internal/util"
 )
 
 type Downloader struct {
@@ -184,7 +186,7 @@ func (d *Downloader) singleDownload(ctx context.Context, rawurl, outPath string,
 
 	elapsed := time.Since(start)
 	speed := float64(written) / 1024.0 / elapsed.Seconds() // KiB/s
-	fmt.Fprintf(os.Stderr, "\nDownloaded %s in %s (%.1f KiB/s)\n", destPath, elapsed.Round(time.Second), speed)
+	fmt.Fprintf(os.Stderr, "\nDownloaded %s in %s (%s/s)\n", destPath, elapsed.Round(time.Second), util.ConvertBytesToHumanReadable(int64(speed*1024)))
 	return nil
 }
 
@@ -236,6 +238,8 @@ func (d *Downloader) concurrentDownload(ctx context.Context, rawurl, outPath str
 
 	wg.Wait()
 
+	fmt.Print("Downloaded all parts! Merging...\n")
+
 	// Merge files
 	destFile, err := os.Create(outPath)
 	if err != nil {
@@ -260,7 +264,7 @@ func (d *Downloader) concurrentDownload(ctx context.Context, rawurl, outPath str
 
 	elapsed := time.Since(startTime)
 	speed := float64(totalSize) / 1024.0 / elapsed.Seconds() // KiB/s
-	fmt.Fprintf(os.Stderr, "\nDownloaded %s in %s (%.1f KiB/s)\n", outPath, elapsed.Round(time.Second), speed)
+	fmt.Fprintf(os.Stderr, "\nDownloaded %s in %s (%s/s)\n", outPath, elapsed.Round(time.Second), util.ConvertBytesToHumanReadable(int64(speed*1024)))
 	return nil
 }
 
@@ -339,8 +343,8 @@ func (d *Downloader) printProgress(written, total int64, start time.Time, verbos
 
 	if total > 0 {
 		pct := float64(written) / float64(total) * 100.0
-		fmt.Fprintf(os.Stderr, "\r%.2f%% %d/%d bytes (%.1f KiB/s) ETA: %s", pct, written, total, speed, eta)
+		fmt.Fprintf(os.Stderr, "\r%.2f%% %s/%s (%.1f KiB/s) ETA: %s", pct, util.ConvertBytesToHumanReadable(written), util.ConvertBytesToHumanReadable(total), speed, eta)
 	} else {
-		fmt.Fprintf(os.Stderr, "\r%d bytes (%.1f KiB/s)", written, speed)
+		fmt.Fprintf(os.Stderr, "\r%s (%.1f KiB/s)", util.ConvertBytesToHumanReadable(written), speed)
 	}
 }
