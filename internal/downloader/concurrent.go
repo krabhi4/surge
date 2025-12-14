@@ -113,7 +113,7 @@ func (q *TaskQueue) Close() {
 func (q *TaskQueue) Len() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return len(q.tasks)
+	return len(q.tasks) - q.head
 }
 
 func (q *TaskQueue) IdleWorkers() int64 {
@@ -306,6 +306,26 @@ func (d *ConcurrentDownloader) Download(ctx context.Context, rawurl, destPath st
 		}
 	}()
 
+	// Monitor for completion
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-balancerCtx.Done():
+				return
+			case <-ticker.C:
+				if queue.Len() == 0 && int(queue.IdleWorkers()) == numConns {
+					queue.Close()
+					return
+				}
+			}
+		}
+	}()
+
 	// Start workers
 	var wg sync.WaitGroup
 	workerErrors := make(chan error, numConns)
@@ -361,6 +381,7 @@ func (d *ConcurrentDownloader) worker(ctx context.Context, id int, rawurl string
 	for {
 		// Get next task
 		task, ok := queue.Pop()
+
 		if !ok {
 			return nil // Queue closed, no more work
 		}
