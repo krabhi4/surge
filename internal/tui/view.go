@@ -107,7 +107,7 @@ func (m RootModel) View() string {
 		header,
 		listContent,
 		"",
-		lipgloss.NewStyle().Foreground(ColorSubtext).Padding(0, 1).Render("[g] Add  [Enter] Details  [q] Quit"),
+		lipgloss.NewStyle().Foreground(ColorSubtext).Padding(0, 1).Render("[g] Add  [p] Pause/Resume  [Enter] Details  [q] Quit"),
 	)
 }
 
@@ -136,6 +136,8 @@ func renderCard(d *DownloadModel, selected bool, width int) string {
 	stats := fmt.Sprintf("Speed: %.1f MB/s | Conns: %d | ETA: %s | %.0f%%", d.Speed/Megabyte, d.Connections, eta, pct*100)
 	if d.done {
 		stats = fmt.Sprintf("Completed | Size: %s", utils.ConvertBytesToHumanReadable(d.Total))
+	} else if d.paused {
+		stats = fmt.Sprintf("⏸ Paused | %s / %s", utils.ConvertBytesToHumanReadable(d.Downloaded), utils.ConvertBytesToHumanReadable(d.Total))
 	} else if d.Speed == 0 && d.Downloaded == 0 {
 		stats = "Status: Queued"
 	}

@@ -61,8 +61,8 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Progress from polling reporter
 		for _, d := range m.downloads {
 			if d.ID == msg.DownloadID {
-				// Don't update if already done
-				if d.done {
+				// Don't update if already done or paused
+				if d.done || d.paused {
 					break
 				}
 
@@ -76,8 +76,8 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmd := d.progress.SetPercent(percentage)
 					cmds = append(cmds, cmd)
 				}
-				// Continue polling only if not done
-				if !d.done {
+				// Continue polling only if not done and not paused
+				if !d.done && !d.paused {
 					cmds = append(cmds, d.reporter.PollCmd())
 				}
 				break
@@ -102,6 +102,28 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if d.ID == msg.DownloadID {
 				d.err = msg.Err
 				d.done = true
+				break
+			}
+		}
+		cmds = append(cmds, listenForActivity(m.progressChan))
+
+	case messages.DownloadPausedMsg:
+		for _, d := range m.downloads {
+			if d.ID == msg.DownloadID {
+				d.paused = true
+				d.Downloaded = msg.Downloaded
+				d.Speed = 0 // Clear speed when paused
+				break
+			}
+		}
+		cmds = append(cmds, listenForActivity(m.progressChan))
+
+	case messages.DownloadResumedMsg:
+		for _, d := range m.downloads {
+			if d.ID == msg.DownloadId {
+				d.paused = false
+				// Restart polling
+				cmds = append(cmds, d.reporter.PollCmd())
 				break
 			}
 		}
@@ -147,6 +169,21 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.downloads) > 0 {
 					m.state = DetailState
 				}
+			}
+
+			// Pause/Resume toggle
+			if msg.String() == "p" {
+				if m.cursor >= 0 && m.cursor < len(m.downloads) {
+					d := m.downloads[m.cursor]
+					if !d.done {
+						if d.paused {
+							m.Pool.Resume(d.ID)
+						} else {
+							m.Pool.Pause(d.ID)
+						}
+					}
+				}
+				return m, nil
 			}
 
 		case DetailState:

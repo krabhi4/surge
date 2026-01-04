@@ -10,7 +10,6 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"surge/internal/utils"
@@ -38,6 +37,8 @@ type ConcurrentDownloader struct {
 	State        *ProgressState // Shared state for TUI polling
 	activeTasks  map[int]*ActiveTask
 	activeMu     sync.Mutex
+	URL          string // For pause/resume
+	DestPath     string // For pause/resume
 }
 
 // NewConcurrentDownloader creates a new concurrent downloader with all required parameters
@@ -135,6 +136,22 @@ func (q *TaskQueue) Len() int {
 
 func (q *TaskQueue) IdleWorkers() int64 {
 	return atomic.LoadInt64(&q.idleWorkers)
+}
+
+// DrainRemaining returns all remaining tasks in the queue (used for pause/resume)
+func (q *TaskQueue) DrainRemaining() []Task {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.head >= len(q.tasks) {
+		return nil
+	}
+
+	remaining := make([]Task, len(q.tasks)-q.head)
+	copy(remaining, q.tasks[q.head:])
+	q.tasks = nil
+	q.head = 0
+	return remaining
 }
 
 // SplitLargestIfNeeded finds the largest queued task and splits it if > 2*MinChunk
@@ -268,6 +285,17 @@ func newConcurrentClient(numConns int) *http.Client {
 func (d *ConcurrentDownloader) Download(ctx context.Context, rawurl, destPath string, fileSize int64, verbose bool) error {
 	utils.Debug("ConcurrentDownloader.Download: %s -> %s (size: %d)", rawurl, destPath, fileSize)
 
+	// Store URL and path for pause/resume
+	d.URL = rawurl
+	d.DestPath = destPath
+
+	// Create cancellable context for pause support
+	downloadCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if d.State != nil {
+		d.State.CancelFunc = cancel
+	}
+
 	// Determine connections and chunk size
 	numConns := getInitialConnections(fileSize)
 	chunkSize := calculateChunkSize(fileSize, numConns)
@@ -282,26 +310,32 @@ func (d *ConcurrentDownloader) Download(ctx context.Context, rawurl, destPath st
 			utils.ConvertBytesToHumanReadable(chunkSize))
 	}
 
-	// Create and preallocate output file
-	outFile, err := os.Create(destPath)
+	// Create and preallocate output file (use OpenFile to allow resume)
+	outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
 	defer outFile.Close()
 
 	// Preallocate file to avoid fragmentation
-	// Use Fallocate to reserve physical blocks (Linux specific)
-	fileDesc := int(outFile.Fd())
-	if err := syscall.Fallocate(fileDesc, 0, 0, fileSize); err != nil {
-		// Fallback to Truncate if Fallocate fails (not supported)
-		utils.Debug("Fallocate failed: %v. Falling back to Truncate.", err)
-		if err := outFile.Truncate(fileSize); err != nil {
-			return fmt.Errorf("failed to preallocate file: %w", err)
-		}
+	if err := outFile.Truncate(fileSize); err != nil {
+		return fmt.Errorf("failed to preallocate file: %w", err)
 	}
 
-	// Create task queue
-	tasks := createTasks(fileSize, chunkSize)
+	// Create task queue - check for saved state first (resume case)
+	var tasks []Task
+	savedState, err := LoadState(destPath, d.ID)
+	if err == nil && savedState != nil && len(savedState.Tasks) > 0 {
+		// Resume: use saved tasks and reset downloaded counter
+		tasks = savedState.Tasks
+		if d.State != nil {
+			d.State.Downloaded.Store(savedState.Downloaded)
+		}
+		utils.Debug("Resuming from saved state: %d tasks, %d bytes downloaded", len(tasks), savedState.Downloaded)
+	} else {
+		// Fresh download: create new tasks
+		tasks = createTasks(fileSize, chunkSize)
+	}
 	queue := NewTaskQueue()
 	queue.PushMultiple(tasks)
 
@@ -309,7 +343,7 @@ func (d *ConcurrentDownloader) Download(ctx context.Context, rawurl, destPath st
 	startTime := time.Now()
 
 	// Start balancer goroutine for dynamic chunk splitting
-	balancerCtx, cancelBalancer := context.WithCancel(ctx)
+	balancerCtx, cancelBalancer := context.WithCancel(downloadCtx)
 	defer cancelBalancer()
 
 	go func() {
@@ -367,8 +401,8 @@ func (d *ConcurrentDownloader) Download(ctx context.Context, rawurl, destPath st
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			err := d.worker(ctx, workerID, rawurl, outFile, queue, fileSize, startTime, verbose, client)
-			if err != nil {
+			err := d.worker(downloadCtx, workerID, rawurl, outFile, queue, fileSize, startTime, verbose, client)
+			if err != nil && err != context.Canceled {
 				workerErrors <- err
 			}
 		}(i)
@@ -381,17 +415,61 @@ func (d *ConcurrentDownloader) Download(ctx context.Context, rawurl, destPath st
 		queue.Close()
 	}()
 
-	// Check for errors
+	// Check for errors or pause
+	var downloadErr error
 	for err := range workerErrors {
 		if err != nil {
-			return err
+			downloadErr = err
 		}
+	}
+
+	// Handle pause: save state and exit gracefully
+	if d.State != nil && d.State.IsPaused() {
+		// Collect remaining tasks
+		remainingTasks := queue.DrainRemaining()
+
+		// Also collect active tasks as remaining work
+		d.activeMu.Lock()
+		for _, active := range d.activeTasks {
+			current := atomic.LoadInt64(&active.CurrentOffset)
+			stopAt := atomic.LoadInt64(&active.StopAt)
+			if current < stopAt {
+				remainingTasks = append(remainingTasks, Task{
+					Offset: current,
+					Length: stopAt - current,
+				})
+			}
+		}
+		d.activeMu.Unlock()
+
+		// Save state for resume
+		state := &DownloadState{
+			ID:         d.ID,
+			URL:        d.URL,
+			DestPath:   destPath,
+			TotalSize:  fileSize,
+			Downloaded: d.State.Downloaded.Load(),
+			Tasks:      remainingTasks,
+		}
+		if err := SaveState(destPath, state); err != nil {
+			utils.Debug("Failed to save pause state: %v", err)
+		}
+
+		utils.Debug("Download paused, state saved")
+		return nil // Graceful exit, not an error
+	}
+
+	if downloadErr != nil {
+		return downloadErr
 	}
 
 	// Final sync
 	if err := outFile.Sync(); err != nil {
 		return fmt.Errorf("failed to sync file: %w", err)
 	}
+
+	// Delete state file on successful completion
+	_ = DeleteState(destPath, d.ID)
 
 	// Print final stats
 	elapsed := time.Since(startTime)

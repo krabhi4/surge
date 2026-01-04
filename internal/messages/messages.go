@@ -34,3 +34,12 @@ type DownloadStartedMsg struct {
 	Filename   string
 	Total      int64
 }
+
+type DownloadPausedMsg struct {
+	DownloadID int
+	Downloaded int64
+}
+
+type DownloadResumedMsg struct {
+	DownloadId int
+}

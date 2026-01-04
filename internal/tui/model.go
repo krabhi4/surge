@@ -44,8 +44,9 @@ type DownloadModel struct {
 	state    *downloader.ProgressState
 	reporter *ProgressReporter
 
-	done bool
-	err  error
+	done   bool
+	err    error
+	paused bool
 }
 
 type RootModel struct {

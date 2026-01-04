@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"context"
 	"sync/atomic"
 	"time"
 )
@@ -13,6 +14,8 @@ type ProgressState struct {
 	ActiveWorkers atomic.Int32
 	Done          atomic.Bool
 	Error         atomic.Pointer[error]
+	Paused        atomic.Bool
+	CancelFunc    context.CancelFunc
 }
 
 func NewProgressState(id int, totalSize int64) *ProgressState {
@@ -45,4 +48,19 @@ func (ps *ProgressState) GetProgress() (downloaded int64, total int64, elapsed t
 	elapsed = time.Since(ps.StartTime)
 	connections = ps.ActiveWorkers.Load()
 	return
+}
+
+func (ps *ProgressState) Pause() {
+	ps.Paused.Store(true)
+	if ps.CancelFunc != nil {
+		ps.CancelFunc()
+	}
+}
+
+func (ps *ProgressState) Resume() {
+	ps.Paused.Store(false)
+}
+
+func (ps *ProgressState) IsPaused() bool {
+	return ps.Paused.Load()
 }
