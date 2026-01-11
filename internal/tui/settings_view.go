@@ -302,6 +302,12 @@ func (m *RootModel) setPerformanceSetting(key, value, typ string) error {
 		}
 	case "slow_worker_threshold":
 		if v, err := strconv.ParseFloat(value, 64); err == nil {
+			// Clamp to valid range 0.0-1.0
+			if v < 0.0 {
+				v = 0.0
+			} else if v > 1.0 {
+				v = 1.0
+			}
 			m.Settings.Performance.SlowWorkerThreshold = v
 		}
 	case "slow_worker_grace_period":
@@ -314,6 +320,12 @@ func (m *RootModel) setPerformanceSetting(key, value, typ string) error {
 		}
 	case "speed_ema_alpha":
 		if v, err := strconv.ParseFloat(value, 64); err == nil {
+			// Clamp to valid range 0.0-1.0
+			if v < 0.0 {
+				v = 0.0
+			} else if v > 1.0 {
+				v = 1.0
+			}
 			m.Settings.Performance.SpeedEmaAlpha = v
 		}
 	}
@@ -362,8 +374,10 @@ func (m RootModel) getSettingUnit() string {
 		return " MB"
 	case "worker_buffer_size":
 		return " KB"
+	case "max_task_retries":
+		return " retries"
 	case "slow_worker_grace_period", "stall_timeout":
-		return " (e.g. 5s)"
+		return " seconds"
 	case "slow_worker_threshold", "speed_ema_alpha":
 		return " (0.0-1.0)"
 	default:
@@ -384,6 +398,11 @@ func formatSettingValueForEdit(value interface{}, typ, key string) string {
 		if v.Kind() == reflect.Int {
 			kb := float64(v.Int()) / 1024
 			return fmt.Sprintf("%.0f", kb)
+		}
+	case "slow_worker_grace_period", "stall_timeout":
+		// Show duration as plain seconds number (e.g., "5" instead of "5s")
+		if d, ok := value.(time.Duration); ok {
+			return fmt.Sprintf("%.0f", d.Seconds())
 		}
 	}
 	// Default: use standard format
