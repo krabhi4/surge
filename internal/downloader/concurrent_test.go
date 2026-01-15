@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"surge/internal/config"
-	"surge/internal/testutil"
+	"github.com/junaid2005p/surge/internal/config"
+	"github.com/junaid2005p/surge/internal/testutil"
 )
 
 // =============================================================================

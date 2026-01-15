@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"surge/internal/utils"
+	"github.com/junaid2005p/surge/internal/utils"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"

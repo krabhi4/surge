@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"surge/internal/utils"
+	"github.com/junaid2005p/surge/internal/utils"
 
 	"github.com/charmbracelet/lipgloss"
 )

@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"surge/internal/downloader"
-	"surge/internal/messages"
+	"github.com/junaid2005p/surge/internal/downloader"
+	"github.com/junaid2005p/surge/internal/messages"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"

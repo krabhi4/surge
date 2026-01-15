@@ -10,7 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"surge/internal/utils"
+	"github.com/junaid2005p/surge/internal/utils"
 )
 
 // SingleDownloader handles single-threaded downloads for servers that don't support range requests.

@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"surge/internal/utils"
+	"github.com/junaid2005p/surge/internal/utils"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

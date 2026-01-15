@@ -8,9 +8,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"surge/internal/config"
-	"surge/internal/tui"
-	"surge/internal/utils"
+	"github.com/junaid2005p/surge/internal/config"
+	"github.com/junaid2005p/surge/internal/tui"
+	"github.com/junaid2005p/surge/internal/utils"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"

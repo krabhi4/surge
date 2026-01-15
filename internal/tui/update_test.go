@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"surge/internal/downloader"
+	"github.com/junaid2005p/surge/internal/downloader"
 )
 
 func TestGenerateUniqueFilename(t *testing.T) {

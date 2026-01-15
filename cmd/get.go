@@ -10,9 +10,9 @@ import (
 	"os"
 	"time"
 
-	"surge/internal/downloader"
-	"surge/internal/messages"
-	"surge/internal/utils"
+	"github.com/junaid2005p/surge/internal/downloader"
+	"github.com/junaid2005p/surge/internal/messages"
+	"github.com/junaid2005p/surge/internal/utils"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
