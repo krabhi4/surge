@@ -430,3 +430,126 @@ func TestConstants(t *testing.T) {
 		t.Errorf("MB should be 1048576, got %d", MB)
 	}
 }
+func TestSaveSettings_RealFunction(t *testing.T) {
+	original := DefaultSettings()
+	original.Connections.MaxConnectionsPerHost = 48
+	original.General.AutoResume = true
+	original.Connections.UserAgent = "TestAgent/3.0"
+
+	err := SaveSettings(original)
+	if err != nil {
+		t.Fatalf("SaveSettings failed: %v", err)
+	}
+
+	// Verify file was created at expected path
+	settingsPath := GetSettingsPath()
+	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
+		t.Error("Settings file was not created by SaveSettings")
+	}
+
+	// Now test LoadSettings to read it back
+	loaded, err := LoadSettings()
+	if err != nil {
+		t.Fatalf("LoadSettings failed: %v", err)
+	}
+
+	// Verify values match
+	if loaded.Connections.MaxConnectionsPerHost != 48 {
+		t.Errorf("MaxConnectionsPerHost mismatch: got %d, want 48", loaded.Connections.MaxConnectionsPerHost)
+	}
+	if !loaded.General.AutoResume {
+		t.Error("AutoResume should be true")
+	}
+	if loaded.Connections.UserAgent != "TestAgent/3.0" {
+		t.Errorf("UserAgent mismatch: got %q, want %q", loaded.Connections.UserAgent, "TestAgent/3.0")
+	}
+
+	// Cleanup: restore defaults
+	_ = SaveSettings(DefaultSettings())
+}
+
+func TestLoadSettings_RealFunction(t *testing.T) {
+	// Test LoadSettings actually reads from disk
+	// First save something
+	original := DefaultSettings()
+	original.Performance.MaxTaskRetries = 99
+	err := SaveSettings(original)
+	if err != nil {
+		t.Fatalf("SaveSettings failed: %v", err)
+	}
+
+	// Now load it
+	loaded, err := LoadSettings()
+	if err != nil {
+		t.Fatalf("LoadSettings failed: %v", err)
+	}
+
+	if loaded.Performance.MaxTaskRetries != 99 {
+		t.Errorf("MaxTaskRetries mismatch: got %d, want 99", loaded.Performance.MaxTaskRetries)
+	}
+
+	// Cleanup
+	_ = SaveSettings(DefaultSettings())
+}
+
+func TestSaveAndLoadSettings_RoundTrip(t *testing.T) {
+	// Test complete round trip via real functions
+	original := &Settings{
+		General: GeneralSettings{
+			DefaultDownloadDir: "/test/path",
+			WarnOnDuplicate:    false,
+			ExtensionPrompt:    true,
+			AutoResume:         true,
+		},
+		Connections: ConnectionSettings{
+			MaxConnectionsPerHost: 64,
+			MaxGlobalConnections:  200,
+			UserAgent:             "RoundTripTest/1.0",
+		},
+		Chunks: ChunkSettings{
+			MinChunkSize:     1 * MB,
+			MaxChunkSize:     64 * MB,
+			TargetChunkSize:  32 * MB,
+			WorkerBufferSize: 1 * MB,
+		},
+		Performance: PerformanceSettings{
+			MaxTaskRetries:        10,
+			SlowWorkerThreshold:   0.2,
+			SlowWorkerGracePeriod: 15 * time.Second,
+			StallTimeout:          10 * time.Second,
+			SpeedEmaAlpha:         0.5,
+		},
+	}
+
+	// Save
+	err := SaveSettings(original)
+	if err != nil {
+		t.Fatalf("SaveSettings failed: %v", err)
+	}
+
+	// Load
+	loaded, err := LoadSettings()
+	if err != nil {
+		t.Fatalf("LoadSettings failed: %v", err)
+	}
+
+	// Verify all fields
+	if loaded.General.WarnOnDuplicate != original.General.WarnOnDuplicate {
+		t.Error("WarnOnDuplicate mismatch")
+	}
+	if loaded.General.ExtensionPrompt != original.General.ExtensionPrompt {
+		t.Error("ExtensionPrompt mismatch")
+	}
+	if loaded.Connections.MaxGlobalConnections != original.Connections.MaxGlobalConnections {
+		t.Error("MaxGlobalConnections mismatch")
+	}
+	if loaded.Chunks.MaxChunkSize != original.Chunks.MaxChunkSize {
+		t.Error("MaxChunkSize mismatch")
+	}
+	if loaded.Performance.SlowWorkerGracePeriod != original.Performance.SlowWorkerGracePeriod {
+		t.Error("SlowWorkerGracePeriod mismatch")
+	}
+
+	// Cleanup
+	_ = SaveSettings(DefaultSettings())
+}

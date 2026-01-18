@@ -126,7 +126,7 @@ func sanitizeFilename(name string) string {
 	if name == "." {
 		return name
 	}
-	if name == "/" {
+	if name == "/" || name == "\\" {
 		return "_"
 	}
 	name = strings.TrimSpace(name)
