@@ -127,7 +127,7 @@ func TestProgressState_GetProgress(t *testing.T) {
 	ps.ActiveWorkers.Store(4)
 	ps.SessionStartBytes = 100
 
-	downloaded, total, elapsed, connections, sessionStart := ps.GetProgress()
+	downloaded, total, totalElapsed, sessionElapsed, connections, sessionStart := ps.GetProgress()
 
 	if downloaded != 500 {
 		t.Errorf("downloaded = %d, want 500", downloaded)
@@ -135,8 +135,11 @@ func TestProgressState_GetProgress(t *testing.T) {
 	if total != 1000 {
 		t.Errorf("total = %d, want 1000", total)
 	}
-	if elapsed <= 0 {
-		t.Error("elapsed should be positive")
+	if totalElapsed <= 0 {
+		t.Error("totalElapsed should be positive")
+	}
+	if sessionElapsed <= 0 {
+		t.Error("sessionElapsed should be positive")
 	}
 	if connections != 4 {
 		t.Errorf("connections = %d, want 4", connections)
@@ -164,5 +167,27 @@ func TestProgressState_AtomicOperations(t *testing.T) {
 
 	if ps.Downloaded.Load() != 1000 {
 		t.Errorf("Downloaded = %d, want 1000 after 10 concurrent adds of 100", ps.Downloaded.Load())
+	}
+}
+func TestProgressState_ElapsedCalculation(t *testing.T) {
+	ps := NewProgressState("test-elapsed", 100)
+
+	// Simulate previous session
+	savedElapsed := 5 * time.Second
+	ps.SetSavedElapsed(savedElapsed)
+
+	// Simulate current session start 2 seconds ago
+	ps.StartTime = time.Now().Add(-2 * time.Second)
+
+	_, _, totalElapsed, sessionElapsed, _, _ := ps.GetProgress()
+
+	// Verify Session Elapsed is approx 2s
+	if sessionElapsed < 1*time.Second || sessionElapsed > 3*time.Second {
+		t.Errorf("SessionElapsed = %v, want ~2s", sessionElapsed)
+	}
+
+	// Verify Total Elapsed is approx 7s (5s + 2s)
+	if totalElapsed < 6*time.Second || totalElapsed > 8*time.Second {
+		t.Errorf("TotalElapsed = %v, want ~7s", totalElapsed)
 	}
 }

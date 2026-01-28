@@ -298,8 +298,9 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				d.Downloaded = msg.Downloaded
+				d.Total = msg.Total
 				d.Speed = msg.Speed
-				d.Elapsed = time.Since(d.StartTime)
+				d.Elapsed = msg.Elapsed // Use total elapsed from engine
 				d.Connections = msg.ActiveConnections
 
 				if d.Total > 0 {
@@ -397,6 +398,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, d := range m.downloads {
 			if d.ID == msg.DownloadID {
 				d.paused = true
+				d.pausing = false // Transition complete
 				d.Downloaded = msg.Downloaded
 				d.Speed = 0 // Clear speed when paused
 				// Add log entry
@@ -723,6 +725,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							cmds = append(cmds, d.reporter.PollCmd())
 						} else {
 							m.Pool.Pause(d.ID)
+							d.pausing = true // Show immediate feedback
 						}
 					}
 				}

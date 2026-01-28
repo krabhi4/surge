@@ -204,6 +204,8 @@ func (d *ConcurrentDownloader) Download(ctx context.Context, rawurl, destPath st
 		tasks = savedState.Tasks
 		if d.State != nil {
 			d.State.Downloaded.Store(savedState.Downloaded)
+			// Restore elapsed time from previous sessions
+			d.State.SetSavedElapsed(time.Duration(savedState.Elapsed))
 			// Fix speed spike: sync session start so we don't count previous bytes as new speed
 			d.State.SyncSessionStart()
 		}
@@ -348,6 +350,14 @@ func (d *ConcurrentDownloader) Download(ctx context.Context, rawurl, destPath st
 		}
 		computedDownloaded := fileSize - remainingBytes
 
+		// Calculate total elapsed time
+		var totalElapsed time.Duration
+		if d.State != nil {
+			totalElapsed = d.State.SavedElapsed + time.Since(startTime)
+		} else {
+			totalElapsed = time.Since(startTime)
+		}
+
 		// Save state for resume (use computed value for consistency)
 		s := &types.DownloadState{
 			URL:        d.URL,
@@ -357,6 +367,7 @@ func (d *ConcurrentDownloader) Download(ctx context.Context, rawurl, destPath st
 			Downloaded: computedDownloaded,
 			Tasks:      remainingTasks,
 			Filename:   filepath.Base(destPath),
+			Elapsed:    totalElapsed.Nanoseconds(),
 		}
 		if err := state.SaveState(d.URL, destPath, s); err != nil {
 			utils.Debug("Failed to save pause state: %v", err)
@@ -387,6 +398,15 @@ func (d *ConcurrentDownloader) Download(ctx context.Context, rawurl, destPath st
 
 	// Rename from .surge to final destination
 	if err := os.Rename(workingPath, destPath); err != nil {
+		// Check for race condition: did someone else already rename it?
+		if os.IsNotExist(err) {
+			if info, statErr := os.Stat(destPath); statErr == nil && info.Size() == fileSize {
+				utils.Debug("Race condition detected: File already exists and has correct size. Treating as success.")
+				// Clean up state just in case, though usually done by caller
+				_ = state.DeleteState(d.ID, d.URL, destPath)
+				return nil
+			}
+		}
 		return fmt.Errorf("failed to rename completed file: %w", err)
 	}
 
