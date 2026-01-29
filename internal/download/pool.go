@@ -49,6 +49,14 @@ func (p *WorkerPool) Add(cfg types.DownloadConfig) {
 	p.mu.Lock()
 	p.queued[cfg.ID] = cfg
 	p.mu.Unlock()
+
+	if p.progressCh != nil && !cfg.IsResume {
+		p.progressCh <- events.DownloadQueuedMsg{
+			DownloadID: cfg.ID,
+			Filename:   cfg.Filename,
+		}
+	}
+
 	p.taskChan <- cfg
 }
 
@@ -72,6 +80,38 @@ func (p *WorkerPool) HasDownload(url string) bool {
 	}
 
 	return false
+}
+
+// ActiveCount returns the number of currently active (downloading/pausing) downloads
+func (p *WorkerPool) ActiveCount() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	count := 0
+	for _, ad := range p.downloads {
+		// Count if not completed and not fully paused
+		if ad.config.State != nil && !ad.config.State.Done.Load() && !ad.config.State.IsPaused() {
+			count++
+		}
+	}
+	// Also count queued
+	count += len(p.queued)
+	return count
+}
+
+// GetAll returns all active download configs (for listing)
+func (p *WorkerPool) GetAll() []types.DownloadConfig {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	var configs []types.DownloadConfig
+	for _, ad := range p.downloads {
+		configs = append(configs, ad.config)
+	}
+	for _, cfg := range p.queued {
+		configs = append(configs, cfg)
+	}
+	return configs
 }
 
 // Pause pauses a specific download by ID
@@ -102,6 +142,7 @@ func (p *WorkerPool) Pause(downloadID string) {
 		}
 		p.progressCh <- events.DownloadPausedMsg{
 			DownloadID: downloadID,
+			Filename:   ad.config.Filename,
 			Downloaded: downloaded,
 		}
 	}
@@ -146,6 +187,14 @@ func (p *WorkerPool) Cancel(downloadID string) {
 	if ad.config.State != nil {
 		ad.config.State.Done.Store(true)
 	}
+
+	// Send removal message
+	if p.progressCh != nil {
+		p.progressCh <- events.DownloadRemovedMsg{
+			DownloadID: downloadID,
+			Filename:   ad.config.Filename,
+		}
+	}
 }
 
 // Resume resumes a paused download by ID
@@ -184,6 +233,7 @@ func (p *WorkerPool) Resume(downloadID string) {
 	if p.progressCh != nil {
 		p.progressCh <- events.DownloadResumedMsg{
 			DownloadID: downloadID,
+			Filename:   ad.config.Filename,
 		}
 	}
 }
@@ -225,7 +275,11 @@ func (p *WorkerPool) worker() {
 				cfg.State.SetError(err)
 			}
 			if p.progressCh != nil {
-				p.progressCh <- events.DownloadErrorMsg{DownloadID: cfg.ID, Err: err}
+				p.progressCh <- events.DownloadErrorMsg{
+					DownloadID: cfg.ID,
+					Filename:   cfg.Filename,
+					Err:        err,
+				}
 			}
 			// Clean up errored download from tracking (don't save to .surge)
 			p.mu.Lock()

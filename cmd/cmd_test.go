@@ -387,22 +387,22 @@ func TestBuildTime_DefaultValue(t *testing.T) {
 // =============================================================================
 
 func TestRootCmd_HasSubcommands(t *testing.T) {
-	// Verify get command is registered
+	// Verify add command is registered (has 'get' as alias)
 	found := false
 	for _, cmd := range rootCmd.Commands() {
-		if cmd.Name() == "get" {
+		if cmd.Name() == "add" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("'get' subcommand not found")
+		t.Error("'add' subcommand not found")
 	}
 }
 
 func TestRootCmd_Use(t *testing.T) {
-	if rootCmd.Use != "surge" {
-		t.Errorf("Expected Use='surge', got %q", rootCmd.Use)
+	if rootCmd.Use != "surge [url]..." {
+		t.Errorf("Expected Use='surge [url]...', got %q", rootCmd.Use)
 	}
 }
 
@@ -498,12 +498,12 @@ func TestSendToServer_ServerError(t *testing.T) {
 }
 
 // =============================================================================
-// getCmd Tests
+// addCmd Tests
 // =============================================================================
 
-func TestGetCmd_Flags(t *testing.T) {
+func TestAddCmd_Flags(t *testing.T) {
 	// Verify flags exist
-	outputFlag := getCmd.Flags().Lookup("output")
+	outputFlag := addCmd.Flags().Lookup("output")
 	if outputFlag == nil {
 		t.Error("Missing 'output' flag")
 	}
@@ -511,33 +511,32 @@ func TestGetCmd_Flags(t *testing.T) {
 		t.Errorf("Expected shorthand 'o', got %q", outputFlag.Shorthand)
 	}
 
-	verboseFlag := getCmd.Flags().Lookup("verbose")
-	if verboseFlag == nil {
-		t.Error("Missing 'verbose' flag")
+	batchFlag := addCmd.Flags().Lookup("batch")
+	if batchFlag == nil {
+		t.Error("Missing 'batch' flag")
 	}
-	if verboseFlag.Shorthand != "v" {
-		t.Errorf("Expected shorthand 'v', got %q", verboseFlag.Shorthand)
-	}
-
-	portFlag := getCmd.Flags().Lookup("port")
-	if portFlag == nil {
-		t.Error("Missing 'port' flag")
-	}
-	if portFlag.Shorthand != "p" {
-		t.Errorf("Expected shorthand 'p', got %q", portFlag.Shorthand)
+	if batchFlag.Shorthand != "b" {
+		t.Errorf("Expected shorthand 'b', got %q", batchFlag.Shorthand)
 	}
 }
 
-func TestGetCmd_Use(t *testing.T) {
-	if getCmd.Use != "get [url]" {
-		t.Errorf("Expected Use='get [url]', got %q", getCmd.Use)
+func TestAddCmd_Use(t *testing.T) {
+	if addCmd.Use != "add [url]..." {
+		t.Errorf("Expected Use='add [url]...', got %q", addCmd.Use)
 	}
 }
 
-func TestGetCmd_Args(t *testing.T) {
-	// getCmd requires exactly 1 arg
-	if getCmd.Args == nil {
-		t.Error("Args validator not set")
+func TestAddCmd_HasGetAlias(t *testing.T) {
+	// addCmd should have 'get' as alias
+	found := false
+	for _, alias := range addCmd.Aliases {
+		if alias == "get" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("addCmd should have 'get' alias")
 	}
 }
 
@@ -905,5 +904,111 @@ func TestFindAvailablePort_HighPort(t *testing.T) {
 
 	if port < 60000 {
 		t.Errorf("Expected port >= 60000, got %d", port)
+	}
+}
+
+// =============================================================================
+// pauseCmd Tests
+// =============================================================================
+
+func TestPauseCmd_Use(t *testing.T) {
+	if pauseCmd.Use != "pause <ID>" {
+		t.Errorf("Expected Use='pause <ID>', got %q", pauseCmd.Use)
+	}
+}
+
+func TestPauseCmd_Flags(t *testing.T) {
+	allFlag := pauseCmd.Flags().Lookup("all")
+	if allFlag == nil {
+		t.Error("Missing 'all' flag")
+	}
+}
+
+// =============================================================================
+// resumeCmd Tests
+// =============================================================================
+
+func TestResumeCmd_Use(t *testing.T) {
+	if resumeCmd.Use != "resume <ID>" {
+		t.Errorf("Expected Use='resume <ID>', got %q", resumeCmd.Use)
+	}
+}
+
+func TestResumeCmd_Flags(t *testing.T) {
+	allFlag := resumeCmd.Flags().Lookup("all")
+	if allFlag == nil {
+		t.Error("Missing 'all' flag")
+	}
+}
+
+// =============================================================================
+// rmCmd Tests
+// =============================================================================
+
+func TestRmCmd_Use(t *testing.T) {
+	if rmCmd.Use != "rm <ID>" {
+		t.Errorf("Expected Use='rm <ID>', got %q", rmCmd.Use)
+	}
+}
+
+func TestRmCmd_HasKillAlias(t *testing.T) {
+	found := false
+	for _, alias := range rmCmd.Aliases {
+		if alias == "kill" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("rmCmd should have 'kill' alias")
+	}
+}
+
+func TestRmCmd_Flags(t *testing.T) {
+	cleanFlag := rmCmd.Flags().Lookup("clean")
+	if cleanFlag == nil {
+		t.Error("Missing 'clean' flag")
+	}
+}
+
+// =============================================================================
+// lsCmd Tests
+// =============================================================================
+
+func TestLsCmd_Use(t *testing.T) {
+	if lsCmd.Use != "ls [id]" {
+		t.Errorf("Expected Use='ls [id]', got %q", lsCmd.Use)
+	}
+}
+
+func TestLsCmd_Flags(t *testing.T) {
+	jsonFlag := lsCmd.Flags().Lookup("json")
+	if jsonFlag == nil {
+		t.Error("Missing 'json' flag")
+	}
+
+	watchFlag := lsCmd.Flags().Lookup("watch")
+	if watchFlag == nil {
+		t.Error("Missing 'watch' flag")
+	}
+}
+
+// =============================================================================
+// serverCmd Tests
+// =============================================================================
+
+func TestServerCmd_HasSubcommands(t *testing.T) {
+	subcommands := map[string]bool{"start": false, "stop": false, "status": false}
+
+	for _, cmd := range serverCmd.Commands() {
+		if _, ok := subcommands[cmd.Name()]; ok {
+			subcommands[cmd.Name()] = true
+		}
+	}
+
+	for name, found := range subcommands {
+		if !found {
+			t.Errorf("Missing '%s' subcommand in serverCmd", name)
+		}
 	}
 }

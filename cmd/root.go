@@ -6,11 +6,10 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
-	"syscall"
+	"time"
 
 	"github.com/surge-downloader/surge/internal/config"
 	"github.com/surge-downloader/surge/internal/download"
@@ -43,10 +42,11 @@ var (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:     "surge",
+	Use:     "surge [url]...",
 	Short:   "An open-source download manager written in Go",
 	Long:    `Surge is a blazing fast, open-source terminal (TUI) download manager built in Go.`,
 	Version: Version,
+	Args:    cobra.ArbitraryArgs,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Initialize Global Progress Channel
 		GlobalProgressCh = make(chan any, 100)
@@ -68,19 +68,16 @@ var rootCmd = &cobra.Command{
 
 		if !isMaster {
 			fmt.Fprintln(os.Stderr, "Error: Surge is already running.")
-			fmt.Fprintln(os.Stderr, "Use 'surge get <url>' to add a download to the active instance.")
+			fmt.Fprintln(os.Stderr, "Use 'surge add <url>' to add a download to the active instance.")
 			os.Exit(1)
 		}
 		defer ReleaseLock()
 
-		// Initialize Global Progress Channel
-		// GlobalProgressCh = make(chan tea.Msg, 100)
-
-		// Initialize Global Worker Pool
-		// GlobalPool = download.NewWorkerPool(GlobalProgressCh, 4)
-
-		isHeadless, _ := cmd.Flags().GetBool("headless")
 		portFlag, _ := cmd.Flags().GetInt("port")
+		batchFile, _ := cmd.Flags().GetString("batch")
+		outputDir, _ := cmd.Flags().GetString("output")
+		noResume, _ := cmd.Flags().GetBool("no-resume")
+		exitWhenDone, _ := cmd.Flags().GetBool("exit-when-done")
 
 		var port int
 		var listener net.Listener
@@ -105,47 +102,41 @@ var rootCmd = &cobra.Command{
 
 		// Save port for browser extension AND CLI discovery
 		saveActivePort(port)
-
-		outputDir, _ := cmd.Flags().GetString("output")
+		defer removeActivePort()
 
 		// Start HTTP server in background (reuse the listener)
 		go startHTTPServer(listener, port, outputDir)
 
-		if isHeadless {
-			fmt.Printf("Surge %s running in headless mode.\n", Version)
-			fmt.Printf("HTTP server listening on port %d\n", port)
-			fmt.Println("Press Ctrl+C to exit.")
+		// Queue initial downloads if any
+		go func() {
+			var urls []string
+			urls = append(urls, args...)
 
-			StartHeadlessConsumer()
-
-			// Auto resume downloads if enabled
-			resumePausedDownloads()
-
-			// Block until signal
-			sigChan := make(chan os.Signal, 1)
-			signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-			<-sigChan
-
-			fmt.Println("\nShutting down...")
-			if GlobalPool != nil {
-				GlobalPool.GracefulShutdown()
+			if batchFile != "" {
+				fileUrls, err := readURLsFromFile(batchFile)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error reading batch file: %v\n", err)
+				} else {
+					urls = append(urls, fileUrls...)
+				}
 			}
 
-		} else {
-			startTUI(port)
-		}
+			if len(urls) > 0 {
+				processDownloads(urls, outputDir, 0) // 0 port = internal direct add
+			}
+		}()
 
-		// Cleanup port file on exit
-		removeActivePort()
+		// Start TUI (default mode)
+		startTUI(port, exitWhenDone, noResume)
 	},
 }
 
 // startTUI initializes and runs the TUI program
-func startTUI(port int) {
+func startTUI(port int, exitWhenDone bool, noResume bool) {
 	// Initialize TUI
 	// GlobalPool and GlobalProgressCh are already initialized in PersistentPreRun or Run
 
-	m := tui.InitialRootModel(port, Version, GlobalPool, GlobalProgressCh)
+	m := tui.InitialRootModel(port, Version, GlobalPool, GlobalProgressCh, noResume)
 	// m := tui.InitialRootModel(port, Version)
 	// No need to instantiate separate pool
 
@@ -158,6 +149,23 @@ func startTUI(port int) {
 			p.Send(msg)
 		}
 	}()
+
+	// Exit-when-done checker for TUI
+	if exitWhenDone {
+		go func() {
+			// Wait a bit for initial downloads to be queued
+			time.Sleep(3 * time.Second)
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				if GlobalPool != nil && GlobalPool.ActiveCount() == 0 {
+					// Send quit message to TUI
+					p.Send(tea.Quit())
+					return
+				}
+			}
+		}()
+	}
 
 	// Run TUI
 	if _, err := p.Run(); err != nil {
@@ -172,13 +180,49 @@ func StartHeadlessConsumer() {
 		for msg := range GlobalProgressCh {
 			switch m := msg.(type) {
 			case events.DownloadStartedMsg:
-				fmt.Printf("Started: %s\n", m.Filename)
+				id := m.DownloadID
+				if len(id) > 8 {
+					id = id[:8]
+				}
+				fmt.Printf("Started: %s [%s]\n", m.Filename, id)
 			case events.DownloadCompleteMsg:
 				atomic.AddInt32(&activeDownloads, -1)
-				fmt.Printf("Completed: %s (in %s)\n", m.Filename, m.Elapsed)
+				id := m.DownloadID
+				if len(id) > 8 {
+					id = id[:8]
+				}
+				fmt.Printf("Completed: %s [%s] (in %s)\n", m.Filename, id, m.Elapsed)
 			case events.DownloadErrorMsg:
 				atomic.AddInt32(&activeDownloads, -1)
-				fmt.Printf("Error: %s\n", m.Err)
+				id := m.DownloadID
+				if len(id) > 8 {
+					id = id[:8]
+				}
+				fmt.Printf("Error: %s [%s]: %v\n", m.Filename, id, m.Err)
+			case events.DownloadQueuedMsg:
+				id := m.DownloadID
+				if len(id) > 8 {
+					id = id[:8]
+				}
+				fmt.Printf("Queued: %s [%s]\n", m.Filename, id)
+			case events.DownloadPausedMsg:
+				id := m.DownloadID
+				if len(id) > 8 {
+					id = id[:8]
+				}
+				fmt.Printf("Paused: %s [%s]\n", m.Filename, id)
+			case events.DownloadResumedMsg:
+				id := m.DownloadID
+				if len(id) > 8 {
+					id = id[:8]
+				}
+				fmt.Printf("Resumed: %s [%s]\n", m.Filename, id)
+			case events.DownloadRemovedMsg:
+				id := m.DownloadID
+				if len(id) > 8 {
+					id = id[:8]
+				}
+				fmt.Printf("Removed: %s [%s]\n", m.Filename, id)
 			}
 		}
 	}()
@@ -288,6 +332,87 @@ func startHTTPServer(ln net.Listener, port int, defaultOutputDir string) {
 		} else {
 			http.Error(w, "Server internal error: pool not initialized", http.StatusInternalServerError)
 		}
+	})
+
+	// List endpoint - returns all downloads with current status
+	mux.HandleFunc("/list", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var statuses []types.DownloadStatus
+
+		// Get active downloads from pool
+		if GlobalPool != nil {
+			activeConfigs := GlobalPool.GetAll()
+			for _, cfg := range activeConfigs {
+				status := types.DownloadStatus{
+					ID:       cfg.ID,
+					URL:      cfg.URL,
+					Filename: cfg.Filename,
+					Status:   "downloading",
+				}
+
+				if cfg.State != nil {
+					status.TotalSize = cfg.State.TotalSize
+					status.Downloaded = cfg.State.Downloaded.Load()
+					if status.TotalSize > 0 {
+						status.Progress = float64(status.Downloaded) * 100 / float64(status.TotalSize)
+					}
+
+					// Calculate speed from progress
+					downloaded, _, _, sessionElapsed, _, sessionStart := cfg.State.GetProgress()
+					sessionDownloaded := downloaded - sessionStart
+					if sessionElapsed.Seconds() > 0 && sessionDownloaded > 0 {
+						status.Speed = float64(sessionDownloaded) / sessionElapsed.Seconds() / (1024 * 1024)
+					}
+
+					// Update status based on state
+					if cfg.State.IsPaused() {
+						status.Status = "paused"
+					} else if cfg.State.Done.Load() {
+						status.Status = "completed"
+					}
+				}
+
+				statuses = append(statuses, status)
+			}
+		}
+
+		// Always fetch from database to get history/paused/completed
+		dbDownloads, err := state.ListAllDownloads()
+		if err == nil {
+			// Create a map of existing IDs to avoid duplicates
+			existingIDs := make(map[string]bool)
+			for _, s := range statuses {
+				existingIDs[s.ID] = true
+			}
+
+			for _, d := range dbDownloads {
+				// Skip if already present (active)
+				if existingIDs[d.ID] {
+					continue
+				}
+
+				var progress float64
+				if d.TotalSize > 0 {
+					progress = float64(d.Downloaded) * 100 / float64(d.TotalSize)
+				}
+				statuses = append(statuses, types.DownloadStatus{
+					ID:         d.ID,
+					URL:        d.URL,
+					Filename:   d.Filename,
+					Status:     d.Status,
+					TotalSize:  d.TotalSize,
+					Downloaded: d.Downloaded,
+					Progress:   progress,
+				})
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(statuses)
 	})
 
 	server := &http.Server{Handler: corsMiddleware(mux)}
@@ -489,13 +614,8 @@ func handleDownload(w http.ResponseWriter, r *http.Request, defaultOutputDir str
 	// Add to pool
 	GlobalPool.Add(cfg)
 
-	// Increment active downloads counter (optional, we might rely on pool now)
+	// Increment active downloads counter
 	atomic.AddInt32(&activeDownloads, 1)
-
-	// In Headless mode, we log to stdout via the progress channel listener
-	if serverProgram == nil {
-		fmt.Printf("Starting download: %s -> %s (ID: %s)\n", req.URL, outPath, downloadID)
-	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
@@ -503,6 +623,80 @@ func handleDownload(w http.ResponseWriter, r *http.Request, defaultOutputDir str
 		"message": "Download queued successfully",
 		"id":      downloadID,
 	})
+}
+
+// processDownloads handles the logic of adding downloads either to local pool or remote server
+// Returns the number of successfully added downloads
+func processDownloads(urls []string, outputDir string, port int) int {
+	successCount := 0
+
+	// If port > 0, we are sending to a remote server
+	if port > 0 {
+		for _, url := range urls {
+			err := sendToServer(url, outputDir, port)
+			if err != nil {
+				fmt.Printf("Error adding %s: %v\n", url, err)
+			} else {
+				successCount++
+			}
+		}
+		return successCount
+	}
+
+	// Internal add (TUI or Headless mode)
+	if GlobalPool == nil {
+		fmt.Fprintln(os.Stderr, "Error: GlobalPool not initialized")
+		return 0
+	}
+
+	settings, err := config.LoadSettings()
+	if err != nil {
+		settings = config.DefaultSettings()
+	}
+
+	for _, url := range urls {
+		// Validation
+		if url == "" {
+			continue
+		}
+
+		// Prepare output path
+		outPath := outputDir
+		if outPath == "" {
+			if settings.General.DefaultDownloadDir != "" {
+				outPath = settings.General.DefaultDownloadDir
+				_ = os.MkdirAll(outPath, 0755)
+			} else {
+				outPath = "."
+			}
+		}
+		outPath = utils.EnsureAbsPath(outPath)
+
+		// Check for duplicates/extensions if we are in TUI mode (serverProgram != nil)
+		// For headless/root direct add, we might skip prompt or auto-approve?
+		// For now, let's just add directly if headless, or prompt if TUI is up.
+
+		downloadID := uuid.New().String()
+
+		// If TUI is up (serverProgram != nil), we might want to send a request msg?
+		// But processDownloads is called from QUEUE init routine, primarily for CLI args.
+		// If CLI args provided, user probably wants them added immediately.
+
+		cfg := types.DownloadConfig{
+			URL:        url,
+			OutputPath: outPath,
+			ID:         downloadID,
+			Verbose:    false,
+			ProgressCh: GlobalProgressCh,
+			State:      types.NewProgressState(downloadID, 0),
+			Runtime:    convertRuntimeConfig(settings.ToRuntimeConfig()),
+		}
+
+		GlobalPool.Add(cfg)
+		atomic.AddInt32(&activeDownloads, 1)
+		successCount++
+	}
+	return successCount
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -513,10 +707,11 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.AddCommand(getCmd)
-	rootCmd.Flags().Bool("headless", false, "Run in headless mode (no TUI)")
+	rootCmd.Flags().StringP("batch", "b", "", "File containing URLs to download (one per line)")
 	rootCmd.Flags().IntP("port", "p", 0, "Port to listen on (default: 8080 or first available)")
-	rootCmd.Flags().StringP("output", "o", "", "Default output directory (headless mode only)")
+	rootCmd.Flags().StringP("output", "o", "", "Default output directory")
+	rootCmd.Flags().Bool("no-resume", false, "Do not auto-resume paused downloads on startup")
+	rootCmd.Flags().Bool("exit-when-done", false, "Exit when all downloads complete")
 	rootCmd.SetVersionTemplate("Surge version {{.Version}}\n")
 }
 
@@ -561,16 +756,17 @@ func resumePausedDownloads() {
 		return // Can't check preference
 	}
 
-	if !settings.General.AutoResume {
-		return
-	}
-
 	pausedEntries, err := state.LoadPausedDownloads()
 	if err != nil {
 		return
 	}
 
 	for _, entry := range pausedEntries {
+		// If entry is explicitly queued, we should start it regardless of AutoResume setting
+		// If entry is paused, we only start it if AutoResume is enabled
+		if entry.Status == "paused" && !settings.General.AutoResume {
+			continue
+		}
 		// Load state to define progress state
 		s, err := state.LoadState(entry.URL, entry.DestPath)
 		if err != nil {
@@ -607,7 +803,7 @@ func resumePausedDownloads() {
 			Runtime:    runtimeConfig,
 		}
 
-		fmt.Printf("Auto-resuming download: %s\n", entry.Filename)
 		GlobalPool.Add(cfg)
+		atomic.AddInt32(&activeDownloads, 1)
 	}
 }

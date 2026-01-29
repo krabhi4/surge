@@ -324,7 +324,7 @@ func LoadPausedDownloads() ([]types.DownloadEntry, error) {
 
 	var paused []types.DownloadEntry
 	for _, e := range list.Downloads {
-		if e.Status == "paused" {
+		if e.Status == "paused" || e.Status == "queued" {
 			paused = append(paused, e)
 		}
 	}
@@ -362,4 +362,71 @@ func CheckDownloadExists(url string) (bool, error) {
 	}
 
 	return count > 0, nil
+}
+
+// UpdateStatus updates the status of a download by ID
+func UpdateStatus(id string, status string) error {
+	db := getDBHelper()
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	result, err := db.Exec("UPDATE downloads SET status = ? WHERE id = ?", status, id)
+	if err != nil {
+		return fmt.Errorf("failed to update status: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("download not found: %s", id)
+	}
+
+	return nil
+}
+
+// PauseAllDownloads pauses all non-completed downloads
+func PauseAllDownloads() error {
+	db := getDBHelper()
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	_, err := db.Exec("UPDATE downloads SET status = 'paused' WHERE status != 'completed'")
+	return err
+}
+
+// ResumeAllDownloads resumes all paused downloads (sets to queued)
+func ResumeAllDownloads() error {
+	db := getDBHelper()
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	_, err := db.Exec("UPDATE downloads SET status = 'queued' WHERE status = 'paused'")
+	return err
+}
+
+// ListAllDownloads returns all downloads
+func ListAllDownloads() ([]types.DownloadEntry, error) {
+	list, err := LoadMasterList()
+	if err != nil {
+		return nil, err
+	}
+	return list.Downloads, nil
+}
+
+// RemoveCompletedDownloads removes all completed downloads and returns count
+func RemoveCompletedDownloads() (int64, error) {
+	db := getDBHelper()
+	if db == nil {
+		return 0, fmt.Errorf("database not initialized")
+	}
+
+	result, err := db.Exec("DELETE FROM downloads WHERE status = 'completed'")
+	if err != nil {
+		return 0, fmt.Errorf("failed to remove completed downloads: %w", err)
+	}
+
+	count, _ := result.RowsAffected()
+	return count, nil
 }
