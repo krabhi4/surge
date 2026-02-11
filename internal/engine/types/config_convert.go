@@ -6,8 +6,8 @@ import "github.com/surge-downloader/surge/internal/config"
 func ConvertRuntimeConfig(rc *config.RuntimeConfig) *RuntimeConfig {
 	return &RuntimeConfig{
 		MaxConnectionsPerHost: rc.MaxConnectionsPerHost,
-		MaxGlobalConnections:  rc.MaxGlobalConnections,
 		UserAgent:             rc.UserAgent,
+		ProxyURL:              rc.ProxyURL,
 		SequentialDownload:    rc.SequentialDownload,
 		MinChunkSize:          rc.MinChunkSize,
 		WorkerBufferSize:      rc.WorkerBufferSize,
