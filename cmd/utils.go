@@ -14,6 +14,7 @@ import (
 	"github.com/surge-downloader/surge/internal/config"
 	"github.com/surge-downloader/surge/internal/engine/state"
 	"github.com/surge-downloader/surge/internal/engine/types"
+	"github.com/surge-downloader/surge/internal/source"
 	"github.com/surge-downloader/surge/internal/utils"
 )
 
@@ -51,17 +52,7 @@ func readURLsFromFile(filepath string) ([]string, error) {
 // ParseURLArg parses a command line argument that might contain comma-separated mirrors
 // Returns the primary URL and a list of all mirrors (including the primary)
 func ParseURLArg(arg string) (string, []string) {
-	parts := strings.Split(arg, ",")
-	var urls []string
-	for _, p := range parts {
-		if trimmed := strings.TrimSpace(p); trimmed != "" {
-			urls = append(urls, trimmed)
-		}
-	}
-	if len(urls) == 0 {
-		return "", nil
-	}
-	return urls[0], urls
+	return source.ParseCommaArg(arg)
 }
 
 // sendToServer sends a download request to a running surge server
