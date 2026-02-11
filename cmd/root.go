@@ -201,72 +201,8 @@ func startTUI(port int, exitWhenDone bool, noResume bool) {
 	}
 }
 
-func getPreferredLocalIP() string {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return ""
-	}
-
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-			if ip == nil || ip.IsLoopback() {
-				continue
-			}
-			if ipv4 := ip.To4(); ipv4 != nil {
-				if ipv4.IsPrivate() {
-					return ipv4.String()
-				}
-			}
-		}
-	}
-
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-			if ip == nil || ip.IsLoopback() {
-				continue
-			}
-			if ipv4 := ip.To4(); ipv4 != nil {
-				return ipv4.String()
-			}
-		}
-	}
-
-	return ""
-}
-
 func getServerBindHost() string {
-	if host := getPreferredLocalIP(); host != "" {
-		return host
-	}
-	return "127.0.0.1"
+	return "0.0.0.0"
 }
 
 // StartHeadlessConsumer starts a goroutine to consume progress messages and log to stdout
@@ -584,7 +520,8 @@ func corsMiddleware(next http.Handler) http.Handler {
 		// Set CORS headers
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS, PUT, PATCH")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Access-Control-Allow-Private-Network")
+		w.Header().Set("Access-Control-Allow-Private-Network", "true")
 
 		// Handle preflight requests
 		if r.Method == "OPTIONS" {
@@ -635,6 +572,10 @@ func ensureAuthToken() string {
 
 	// Generate new token
 	token := uuid.New().String()
+	// Ensure directory exists
+	if err := os.MkdirAll(filepath.Dir(tokenFile), 0755); err != nil {
+		utils.Debug("Failed to create token directory: %v", err)
+	}
 	if err := os.WriteFile(tokenFile, []byte(token), 0600); err != nil {
 		utils.Debug("Failed to write token file: %v", err)
 	}

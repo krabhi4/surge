@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -274,36 +273,10 @@ func TestIsLocalHost(t *testing.T) {
 	}
 }
 
-func TestGetPreferredLocalIP(t *testing.T) {
-	got := getPreferredLocalIP()
-	if strings.TrimSpace(got) == "" {
-		// Valid in environments with loopback only.
-		return
-	}
-
-	ip := net.ParseIP(got)
-	if ip == nil {
-		t.Fatalf("getPreferredLocalIP returned invalid IP: %q", got)
-	}
-	if ip.To4() == nil {
-		t.Fatalf("getPreferredLocalIP should return IPv4, got: %q", got)
-	}
-	if !ip.IsPrivate() {
-		t.Fatalf("getPreferredLocalIP should prefer private IPv4, got: %q", got)
-	}
-}
-
 func TestGetServerBindHost(t *testing.T) {
 	host := getServerBindHost()
-	if strings.TrimSpace(host) == "" {
-		t.Fatal("getServerBindHost returned empty string")
-	}
-	ip := net.ParseIP(host)
-	if ip == nil || ip.To4() == nil {
-		t.Fatalf("getServerBindHost returned invalid IPv4: %q", host)
-	}
-	if !ip.IsPrivate() && !ip.IsLoopback() {
-		t.Fatalf("getServerBindHost should be private or loopback, got: %q", host)
+	if host != "0.0.0.0" {
+		t.Errorf("getServerBindHost should be 0.0.0.0, got: %q", host)
 	}
 }
 

@@ -565,7 +565,10 @@ async function handleDownloadIntercept(downloadItem) {
     try {
       await chrome.action.openPopup();
     } catch (e) {
-      console.log("[Surge] openPopup failed (might be open or no user gesture):", e);
+      console.log(
+        "[Surge] openPopup failed (might be open or no user gesture):",
+        e,
+      );
     }
 
     // Send message to popup
@@ -682,11 +685,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         case "getAuthToken": {
           const token = await loadAuthToken();
-          sendResponse({ token });
+          const result = await chrome.storage.local.get("authVerified");
+          sendResponse({ token, verified: result.authVerified === true });
           break;
         }
         case "setAuthToken": {
           await setAuthToken(message.token || "");
+          // Reset verification on token change
+          await chrome.storage.local.set({ authVerified: false });
+          sendResponse({ success: true });
+          break;
+        }
+
+        case "getAuthVerified": {
+          const result = await chrome.storage.local.get("authVerified");
+          sendResponse({ verified: result.authVerified === true });
+          break;
+        }
+
+        case "setAuthVerified": {
+          await chrome.storage.local.set({
+            authVerified: message.verified === true,
+          });
           sendResponse({ success: true });
           break;
         }
@@ -767,14 +787,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
             // Check for next pending duplicate
             if (pendingDuplicates.size > 0) {
-              const [nextId, nextData] = pendingDuplicates.entries().next().value;
-              const nextName = nextData.filename || nextData.url.split("/").pop() || "Unknown file";
-              
-              chrome.runtime.sendMessage({
-                type: "promptDuplicate",
-                id: nextId,
-                filename: nextName,
-              }).catch(() => {});
+              const [nextId, nextData] = pendingDuplicates
+                .entries()
+                .next().value;
+              const nextName =
+                nextData.filename ||
+                nextData.url.split("/").pop() ||
+                "Unknown file";
+
+              chrome.runtime
+                .sendMessage({
+                  type: "promptDuplicate",
+                  id: nextId,
+                  filename: nextName,
+                })
+                .catch(() => {});
             }
 
             sendResponse({ success: result.success });
@@ -798,17 +825,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               "[Surge] User skipped duplicate download:",
               pending.url,
             );
-            
+
             // Check for next pending duplicate
             if (pendingDuplicates.size > 0) {
-              const [nextId, nextData] = pendingDuplicates.entries().next().value;
-              const nextName = nextData.filename || nextData.url.split("/").pop() || "Unknown file";
-              
-              chrome.runtime.sendMessage({
-                type: "promptDuplicate",
-                id: nextId,
-                filename: nextName,
-              }).catch(() => {});
+              const [nextId, nextData] = pendingDuplicates
+                .entries()
+                .next().value;
+              const nextName =
+                nextData.filename ||
+                nextData.url.split("/").pop() ||
+                "Unknown file";
+
+              chrome.runtime
+                .sendMessage({
+                  type: "promptDuplicate",
+                  id: nextId,
+                  filename: nextName,
+                })
+                .catch(() => {});
             }
           }
           sendResponse({ success: true });

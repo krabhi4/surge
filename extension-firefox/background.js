@@ -644,11 +644,24 @@ browser.runtime.onMessage.addListener((message, sender) => {
 
         case 'getAuthToken': {
           const token = await loadAuthToken();
-          return { token };
+          const result = await browser.storage.local.get('authVerified');
+          return { token, verified: result.authVerified === true };
         }
         
         case 'setAuthToken': {
           await setAuthToken(message.token || '');
+          // Reset verification on token change
+          await browser.storage.local.set({ authVerified: false });
+          return { success: true };
+        }
+        
+        case 'getAuthVerified': {
+          const result = await browser.storage.local.get('authVerified');
+          return { verified: result.authVerified === true };
+        }
+
+        case 'setAuthVerified': {
+          await browser.storage.local.set({ authVerified: message.verified === true });
           return { success: true };
         }
         

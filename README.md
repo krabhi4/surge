@@ -87,8 +87,8 @@ surge server start https://url.com/file.zip
 surge server status
 ```
 
-`surge` and `surge server start` bind the HTTP API to a detected private LAN IPv4 address by default.
-If no private interface is available, Surge falls back to `localhost`.
+`surge` and `surge server start` bind the HTTP API to `0.0.0.0` (all interfaces) by default.
+This means the server is accessible via `localhost` (127.0.0.1) as well as your local network IP.
 
 The API is token-protected. Generate/read your token from:
 
@@ -109,6 +109,7 @@ surge connect 192.168.1.10:1700 --token <token>
 ```
 
 By default, `surge connect` uses:
+
 - `http://` for loopback and private IP targets
 - `https://` for public/hostname targets
 
