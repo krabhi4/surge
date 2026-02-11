@@ -230,13 +230,13 @@ func (m RootModel) getSettingsValues(category string) map[string]interface{} {
 		values["log_retention_count"] = m.Settings.General.LogRetentionCount
 
 	case "Network":
-		values["max_connections_per_host"] = m.Settings.Connections.MaxConnectionsPerHost
-		values["max_global_connections"] = m.Settings.Connections.MaxGlobalConnections
-		values["max_concurrent_downloads"] = m.Settings.Connections.MaxConcurrentDownloads
-		values["user_agent"] = m.Settings.Connections.UserAgent
-		values["sequential_download"] = m.Settings.Connections.SequentialDownload
-		values["min_chunk_size"] = m.Settings.Chunks.MinChunkSize
-		values["worker_buffer_size"] = m.Settings.Chunks.WorkerBufferSize
+		values["max_connections_per_host"] = m.Settings.Network.MaxConnectionsPerHost
+		values["max_global_connections"] = m.Settings.Network.MaxGlobalConnections
+		values["max_concurrent_downloads"] = m.Settings.Network.MaxConcurrentDownloads
+		values["user_agent"] = m.Settings.Network.UserAgent
+		values["sequential_download"] = m.Settings.Network.SequentialDownload
+		values["min_chunk_size"] = m.Settings.Network.MinChunkSize
+		values["worker_buffer_size"] = m.Settings.Network.WorkerBufferSize
 	case "Performance":
 		values["max_task_retries"] = m.Settings.Performance.MaxTaskRetries
 		values["slow_worker_threshold"] = m.Settings.Performance.SlowWorkerThreshold
@@ -265,12 +265,7 @@ func (m *RootModel) setSettingValue(category, key, value string) error {
 	case "General":
 		return m.setGeneralSetting(key, value, meta.Type)
 	case "Network":
-		// Dispatch to appropriate setter based on key
-		if key == "min_chunk_size" || key == "worker_buffer_size" {
-			return m.setChunksSetting(key, value, meta.Type)
-		} else {
-			return m.setConnectionsSetting(key, value, meta.Type)
-		}
+		return m.setNetworkSetting(key, value, meta.Type)
 	case "Performance":
 		return m.setPerformanceSetting(key, value, meta.Type)
 	}
@@ -332,11 +327,11 @@ func (m *RootModel) setConnectionsSetting(key, value, typ string) error {
 	switch key {
 	case "max_connections_per_host":
 		if v, err := strconv.Atoi(value); err == nil {
-			m.Settings.Connections.MaxConnectionsPerHost = v
+			m.Settings.Network.MaxConnectionsPerHost = v
 		}
 	case "max_global_connections":
 		if v, err := strconv.Atoi(value); err == nil {
-			m.Settings.Connections.MaxGlobalConnections = v
+			m.Settings.Network.MaxGlobalConnections = v
 		}
 	case "max_concurrent_downloads":
 		if v, err := strconv.Atoi(value); err == nil {
@@ -345,34 +340,34 @@ func (m *RootModel) setConnectionsSetting(key, value, typ string) error {
 			} else if v > 10 {
 				v = 10
 			}
-			m.Settings.Connections.MaxConcurrentDownloads = v
+			m.Settings.Network.MaxConcurrentDownloads = v
 		}
 	case "user_agent":
-		m.Settings.Connections.UserAgent = value
+		m.Settings.Network.UserAgent = value
 	case "sequential_download":
 		// Toggle logic handled by generic bool toggle in Update, but just in case
 		if value == "" {
-			m.Settings.Connections.SequentialDownload = !m.Settings.Connections.SequentialDownload
+			m.Settings.Network.SequentialDownload = !m.Settings.Network.SequentialDownload
 		} else {
 			// For programmatic setting if ever needed
 			b, _ := strconv.ParseBool(value)
-			m.Settings.Connections.SequentialDownload = b
+			m.Settings.Network.SequentialDownload = b
 		}
 	}
 	return nil
 }
 
-func (m *RootModel) setChunksSetting(key, value, typ string) error {
+func (m *RootModel) setNetworkSetting(key, value, typ string) error {
 	switch key {
 	case "min_chunk_size":
 		// Parse as MB and convert to bytes
 		if v, err := strconv.ParseFloat(value, 64); err == nil {
-			m.Settings.Chunks.MinChunkSize = int64(v * 1024 * 1024)
+			m.Settings.Network.MinChunkSize = int64(v * 1024 * 1024)
 		}
 	case "worker_buffer_size":
 		// Keep buffer in KB
 		if v, err := strconv.ParseFloat(value, 64); err == nil {
-			m.Settings.Chunks.WorkerBufferSize = int(v * 1024)
+			m.Settings.Network.WorkerBufferSize = int(v * 1024)
 		}
 	}
 	return nil
@@ -596,22 +591,22 @@ func (m *RootModel) resetSettingToDefault(category, key string, defaults *config
 		}
 
 	case "Network":
-		// Check both connections and chunks keys
+		// Check both connections and Network keys
 		switch key {
 		case "max_connections_per_host":
-			m.Settings.Connections.MaxConnectionsPerHost = defaults.Connections.MaxConnectionsPerHost
+			m.Settings.Network.MaxConnectionsPerHost = defaults.Network.MaxConnectionsPerHost
 		case "max_global_connections":
-			m.Settings.Connections.MaxGlobalConnections = defaults.Connections.MaxGlobalConnections
+			m.Settings.Network.MaxGlobalConnections = defaults.Network.MaxGlobalConnections
 		case "max_concurrent_downloads":
-			m.Settings.Connections.MaxConcurrentDownloads = defaults.Connections.MaxConcurrentDownloads
+			m.Settings.Network.MaxConcurrentDownloads = defaults.Network.MaxConcurrentDownloads
 		case "user_agent":
-			m.Settings.Connections.UserAgent = defaults.Connections.UserAgent
+			m.Settings.Network.UserAgent = defaults.Network.UserAgent
 		case "sequential_download":
-			m.Settings.Connections.SequentialDownload = defaults.Connections.SequentialDownload
+			m.Settings.Network.SequentialDownload = defaults.Network.SequentialDownload
 		case "min_chunk_size":
-			m.Settings.Chunks.MinChunkSize = defaults.Chunks.MinChunkSize
+			m.Settings.Network.MinChunkSize = defaults.Network.MinChunkSize
 		case "worker_buffer_size":
-			m.Settings.Chunks.WorkerBufferSize = defaults.Chunks.WorkerBufferSize
+			m.Settings.Network.WorkerBufferSize = defaults.Network.WorkerBufferSize
 		}
 	case "Performance":
 		switch key {

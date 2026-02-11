@@ -700,7 +700,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Open file
 			if key.Matches(msg, m.keys.Dashboard.OpenFile) {
 				if d := m.GetSelectedDownload(); d != nil {
-					canOpen := d.done || (m.Settings.Connections.SequentialDownload && !d.paused && d.Downloaded > 0)
+					canOpen := d.done || (m.Settings.Network.SequentialDownload && !d.paused && d.Downloaded > 0)
 					if canOpen && d.Destination != "" {
 						filePath := d.Destination
 						if !d.done {
