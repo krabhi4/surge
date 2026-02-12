@@ -616,6 +616,21 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, tea.Quit
 			}
+			// Quit
+			if key.Matches(msg, m.keys.Dashboard.Quit) {
+				// Graceful shutdown
+				if m.Service != nil {
+					_ = m.Service.Shutdown()
+				}
+				return m, tea.Quit
+			}
+			if key.Matches(msg, m.keys.Dashboard.ForceQuit) {
+				// Force quit (same as shutdown for now, or just exit)
+				if m.Service != nil {
+					_ = m.Service.Shutdown()
+				}
+				return m, tea.Quit
+			}
 
 			// Add download
 			if key.Matches(msg, m.keys.Dashboard.Add) {
@@ -665,7 +680,17 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, nil
 					}
 					targetID := d.ID
+			if key.Matches(msg, m.keys.Dashboard.Delete) {
+				if m.list.FilterState() == list.Filtering {
+					// Fall through
+				} else if d := m.GetSelectedDownload(); d != nil {
+					if m.Service == nil {
+						m.addLogEntry(LogStyleError.Render("✖ Service unavailable"))
+						return m, nil
+					}
+					targetID := d.ID
 
+					// Call Service Delete
 					// Call Service Delete
 					if err := m.Service.Delete(targetID); err != nil {
 						m.addLogEntry(LogStyleError.Render("✖ Delete failed: " + err.Error()))
@@ -691,11 +716,33 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.historyEntries = entries
 					m.historyCursor = 0
 					m.state = HistoryState
+			if key.Matches(msg, m.keys.Dashboard.History) {
+				// Note: accessing state directly here breaks abstraction.
+				// Ideally Service should provide History.
+				// For now, let's keep it as is, knowing "History"
+				// If Remote Service, we might need an API for history.
+				if m.Service == nil {
+					m.addLogEntry(LogStyleError.Render("✖ Service unavailable"))
+					return m, nil
+				}
+				if entries, err := m.Service.History(); err == nil {
+					m.historyEntries = entries
+					m.historyCursor = 0
+					m.state = HistoryState
 				}
 				return m, nil
 			}
 
 			// Pause/Resume toggle
+			if key.Matches(msg, m.keys.Dashboard.Pause) {
+				if d := m.GetSelectedDownload(); d != nil {
+					if m.Service == nil {
+						m.addLogEntry(LogStyleError.Render("✖ Service unavailable"))
+						return m, nil
+					}
+					if !d.done {
+						if d.paused {
+							// Resume
 			if key.Matches(msg, m.keys.Dashboard.Pause) {
 				if d := m.GetSelectedDownload(); d != nil {
 					if m.Service == nil {
@@ -1155,7 +1202,14 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if categoryCount == 0 {
 				return m, nil
 			}
+		case SettingsState:
+			categoryCount := len(config.CategoryOrder())
+			if categoryCount == 0 {
+				return m, nil
+			}
 
+			// Handle editing mode first
+			if m.SettingsIsEditing {
 			// Handle editing mode first
 			if m.SettingsIsEditing {
 				if key.Matches(msg, m.keys.SettingsEditor.Cancel) {
@@ -1216,7 +1270,46 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.SettingsSelectedRow = 0
 				return m, nil
 			}
+			if key.Matches(msg, m.keys.Settings.Tab1) {
+				if categoryCount > 0 {
+					m.SettingsActiveTab = 0
+				}
+				m.SettingsSelectedRow = 0
+				return m, nil
+			}
+			if key.Matches(msg, m.keys.Settings.Tab2) {
+				if categoryCount > 1 {
+					m.SettingsActiveTab = 1
+				}
+				m.SettingsSelectedRow = 0
+				return m, nil
+			}
+			if key.Matches(msg, m.keys.Settings.Tab3) {
+				if categoryCount > 2 {
+					m.SettingsActiveTab = 2
+				}
+				m.SettingsSelectedRow = 0
+				return m, nil
+			}
+			if key.Matches(msg, m.keys.Settings.Tab4) {
+				if categoryCount > 3 {
+					m.SettingsActiveTab = 3
+				}
+				m.SettingsSelectedRow = 0
+				return m, nil
+			}
 
+			// Tab Navigation
+			if key.Matches(msg, m.keys.Settings.NextTab) {
+				m.SettingsActiveTab = (m.SettingsActiveTab + 1) % categoryCount
+				m.SettingsSelectedRow = 0
+				return m, nil
+			}
+			if key.Matches(msg, m.keys.Settings.PrevTab) {
+				m.SettingsActiveTab = (m.SettingsActiveTab - 1 + categoryCount) % categoryCount
+				m.SettingsSelectedRow = 0
+				return m, nil
+			}
 			// Tab Navigation
 			if key.Matches(msg, m.keys.Settings.NextTab) {
 				m.SettingsActiveTab = (m.SettingsActiveTab + 1) % categoryCount

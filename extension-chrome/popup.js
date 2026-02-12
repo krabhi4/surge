@@ -539,6 +539,15 @@ async function init() {
       const response = await apiCall('getAuthToken');
       if (response && typeof response.token === 'string') {
         authTokenInput.value = response.token;
+        
+        // Check verification status from response
+        if (response.verified) {
+           setAuthValid(true);
+           if (authStatus) {
+             authStatus.className = 'auth-status ok';
+             authStatus.textContent = 'Token valid';
+           }
+        }
       }
     } catch (error) {
       console.error('[Surge Popup] Error loading auth token:', error);
@@ -602,7 +611,7 @@ window.addEventListener('unload', () => {
 
 // Save auth token
 if (isExtensionContext && saveTokenButton && authTokenInput) {
-  saveTokenButton.addEventListener('click', async () => {
+      saveTokenButton.addEventListener('click', async () => {
     if (!serverConnected) {
       if (authStatus) {
         authStatus.className = 'auth-status err';
@@ -613,6 +622,7 @@ if (isExtensionContext && saveTokenButton && authTokenInput) {
     if (saveTokenButton.textContent === 'Delete') {
       try {
         await apiCall('setAuthToken', { token: '' });
+        await apiCall('setAuthVerified', { verified: false });
       } catch (error) {
         console.error('[Surge Popup] Error deleting auth token:', error);
       } finally {
@@ -643,6 +653,7 @@ if (isExtensionContext && saveTokenButton && authTokenInput) {
           authStatus.className = 'auth-status ok';
           authStatus.textContent = 'Token valid';
         }
+        await apiCall('setAuthVerified', { verified: true });
         setAuthValid(true);
         await fetchDownloads();
       } else {
@@ -650,6 +661,7 @@ if (isExtensionContext && saveTokenButton && authTokenInput) {
           authStatus.className = 'auth-status err';
           authStatus.textContent = 'Token invalid';
         }
+        await apiCall('setAuthVerified', { verified: false });
         setAuthValid(false);
       }
     } catch (error) {

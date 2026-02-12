@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -99,6 +98,10 @@ func TestFindAvailablePort_AllPortsOccupied(t *testing.T) {
 // =============================================================================
 
 func TestSaveAndRemoveActivePort(t *testing.T) {
+	// Setup temp dir
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", tmpDir)
+	t.Setenv("XDG_CONFIG_HOME", tmpDir) // For EnsureDirs to work happily
 	// Ensure config dirs exist
 	if err := config.EnsureDirs(); err != nil {
 		t.Fatalf("Failed to ensure dirs: %v", err)
@@ -109,7 +112,7 @@ func TestSaveAndRemoveActivePort(t *testing.T) {
 	saveActivePort(testPort)
 
 	// Verify file exists and contains correct port
-	portFile := filepath.Join(config.GetSurgeDir(), "port")
+	portFile := filepath.Join(config.GetRuntimeDir(), "port")
 	data, err := os.ReadFile(portFile)
 	if err != nil {
 		t.Fatalf("Failed to read port file: %v", err)
@@ -274,36 +277,10 @@ func TestIsLocalHost(t *testing.T) {
 	}
 }
 
-func TestGetPreferredLocalIP(t *testing.T) {
-	got := getPreferredLocalIP()
-	if strings.TrimSpace(got) == "" {
-		// Valid in environments with loopback only.
-		return
-	}
-
-	ip := net.ParseIP(got)
-	if ip == nil {
-		t.Fatalf("getPreferredLocalIP returned invalid IP: %q", got)
-	}
-	if ip.To4() == nil {
-		t.Fatalf("getPreferredLocalIP should return IPv4, got: %q", got)
-	}
-	if !ip.IsPrivate() {
-		t.Fatalf("getPreferredLocalIP should prefer private IPv4, got: %q", got)
-	}
-}
-
 func TestGetServerBindHost(t *testing.T) {
 	host := getServerBindHost()
-	if strings.TrimSpace(host) == "" {
-		t.Fatal("getServerBindHost returned empty string")
-	}
-	ip := net.ParseIP(host)
-	if ip == nil || ip.To4() == nil {
-		t.Fatalf("getServerBindHost returned invalid IPv4: %q", host)
-	}
-	if !ip.IsPrivate() && !ip.IsLoopback() {
-		t.Fatalf("getServerBindHost should be private or loopback, got: %q", host)
+	if host != "0.0.0.0" {
+		t.Errorf("getServerBindHost should be 0.0.0.0, got: %q", host)
 	}
 }
 
@@ -982,6 +959,11 @@ func TestCorsMiddleware_AllMethods(t *testing.T) {
 // =============================================================================
 
 func TestPortFileLifecycle(t *testing.T) {
+	// Setup temp dir
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", tmpDir)
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
 	if err := config.EnsureDirs(); err != nil {
 		t.Fatalf("Failed to ensure dirs: %v", err)
 	}
@@ -989,7 +971,7 @@ func TestPortFileLifecycle(t *testing.T) {
 	// Clean up first
 	removeActivePort()
 
-	portFile := filepath.Join(config.GetSurgeDir(), "port")
+	portFile := filepath.Join(config.GetRuntimeDir(), "port")
 
 	// Verify no port file initially
 	if _, err := os.Stat(portFile); !os.IsNotExist(err) {

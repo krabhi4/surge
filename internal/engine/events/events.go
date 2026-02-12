@@ -28,6 +28,7 @@ type DownloadCompleteMsg struct {
 	Filename   string
 	Elapsed    time.Duration
 	Total      int64
+	AvgSpeed   float64 // Average download speed in bytes/sec
 }
 
 // DownloadErrorMsg signals that an error occurred
@@ -120,6 +121,9 @@ type DownloadRemovedMsg struct {
 	DownloadID string
 	Filename   string
 }
+
+// BatchProgressMsg represents a batch of progress updates to reduce TUI render calls
+type BatchProgressMsg []ProgressMsg
 
 // DownloadRequestMsg signals a request to start a download (e.g. from extension)
 // that may need user confirmation or duplicate checking

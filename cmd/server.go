@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"net"
+
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -136,21 +136,21 @@ func init() {
 
 func savePID() {
 	pid := os.Getpid()
-	pidFile := filepath.Join(config.GetSurgeDir(), "pid")
+	pidFile := filepath.Join(config.GetRuntimeDir(), "pid")
 	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", pid)), 0o644); err != nil {
 		utils.Debug("Error writing PID file: %v", err)
 	}
 }
 
 func removePID() {
-	pidFile := filepath.Join(config.GetSurgeDir(), "pid")
+	pidFile := filepath.Join(config.GetRuntimeDir(), "pid")
 	if err := os.Remove(pidFile); err != nil && !os.IsNotExist(err) {
 		utils.Debug("Error removing PID file: %v", err)
 	}
 }
 
 func readPID() int {
-	pidFile := filepath.Join(config.GetSurgeDir(), "pid")
+	pidFile := filepath.Join(config.GetRuntimeDir(), "pid")
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		return 0
@@ -160,24 +160,10 @@ func readPID() int {
 }
 
 func startServerLogic(cmd *cobra.Command, args []string, portFlag int, batchFile string, outputDir string, exitWhenDone bool, noResume bool) {
-	var port int
-	var listener net.Listener
-	bindHost := getServerBindHost()
-
-	if portFlag > 0 {
-		port = portFlag
-		var err error
-		listener, err = net.Listen("tcp", fmt.Sprintf("%s:%d", bindHost, port))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: could not bind to port %d: %v\n", port, err)
-			os.Exit(1)
-		}
-	} else {
-		port, listener = findAvailablePort(1700)
-		if listener == nil {
-			fmt.Fprintf(os.Stderr, "Error: could not find available port\n")
-			os.Exit(1)
-		}
+	port, listener, err := bindServerListener(portFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Initialize Service

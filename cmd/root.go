@@ -35,6 +35,9 @@ var (
 // activeDownloads tracks the number of currently running downloads in headless mode
 var activeDownloads int32
 
+// Command line flags
+var verbose bool
+
 // Globals for Unified Backend
 var (
 	GlobalPool       *download.WorkerPool
@@ -51,6 +54,9 @@ var rootCmd = &cobra.Command{
 	Version: Version,
 	Args:    cobra.ArbitraryArgs,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Set global verbose mode
+		utils.SetVerbose(verbose)
+
 		// Initialize Global Progress Channel
 		GlobalProgressCh = make(chan any, 100)
 
@@ -64,6 +70,14 @@ var rootCmd = &cobra.Command{
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		initializeGlobalState()
+
+		// Validate integrity of paused downloads before resuming
+		// Removes entries whose .surge files are missing or tampered with
+		if removed, err := state.ValidateIntegrity(); err != nil {
+			utils.Debug("Integrity check failed: %v", err)
+		} else if removed > 0 {
+			utils.Debug("Integrity check: removed %d corrupted/orphaned downloads", removed)
+		}
 
 		// Attempt to acquire lock
 		isMaster, err := AcquireLock()
@@ -92,26 +106,10 @@ var rootCmd = &cobra.Command{
 		noResume, _ := cmd.Flags().GetBool("no-resume")
 		exitWhenDone, _ := cmd.Flags().GetBool("exit-when-done")
 
-		var port int
-		var listener net.Listener
-		bindHost := getServerBindHost()
-
-		if portFlag > 0 {
-			// Strict port mode
-			port = portFlag
-			var err error
-			listener, err = net.Listen("tcp", fmt.Sprintf("%s:%d", bindHost, port))
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: could not bind to port %d: %v\n", port, err)
-				os.Exit(1)
-			}
-		} else {
-			// Auto-discovery mode
-			port, listener = findAvailablePort(1700)
-			if listener == nil {
-				fmt.Fprintf(os.Stderr, "Error: could not find available port\n")
-				os.Exit(1)
-			}
+		port, listener, err := bindServerListener(portFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
 		}
 
 		// Save port for browser extension AND CLI discovery
@@ -156,8 +154,6 @@ func startTUI(port int, exitWhenDone bool, noResume bool) {
 		m.ServerHost = "127.0.0.1"
 	}
 	m.IsRemote = false
-	// m := tui.InitialRootModel(port, Version)
-	// No need to instantiate separate pool
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	serverProgram = p // Save reference for HTTP handler
@@ -201,72 +197,8 @@ func startTUI(port int, exitWhenDone bool, noResume bool) {
 	}
 }
 
-func getPreferredLocalIP() string {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return ""
-	}
-
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-			if ip == nil || ip.IsLoopback() {
-				continue
-			}
-			if ipv4 := ip.To4(); ipv4 != nil {
-				if ipv4.IsPrivate() {
-					return ipv4.String()
-				}
-			}
-		}
-	}
-
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-			if ip == nil || ip.IsLoopback() {
-				continue
-			}
-			if ipv4 := ip.To4(); ipv4 != nil {
-				return ipv4.String()
-			}
-		}
-	}
-
-	return ""
-}
-
 func getServerBindHost() string {
-	if host := getPreferredLocalIP(); host != "" {
-		return host
-	}
-	return "127.0.0.1"
+	return "0.0.0.0"
 }
 
 // StartHeadlessConsumer starts a goroutine to consume progress messages and log to stdout
@@ -345,9 +277,25 @@ func findAvailablePort(start int) (int, net.Listener) {
 	return 0, nil
 }
 
+func bindServerListener(portFlag int) (int, net.Listener, error) {
+	bindHost := getServerBindHost()
+	if portFlag > 0 {
+		ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", bindHost, portFlag))
+		if err != nil {
+			return 0, nil, fmt.Errorf("could not bind to port %d: %w", portFlag, err)
+		}
+		return portFlag, ln, nil
+	}
+	port, ln := findAvailablePort(1700)
+	if ln == nil {
+		return 0, nil, fmt.Errorf("could not find available port")
+	}
+	return port, ln, nil
+}
+
 // saveActivePort writes the active port to ~/.surge/port for extension discovery
 func saveActivePort(port int) {
-	portFile := filepath.Join(config.GetSurgeDir(), "port")
+	portFile := filepath.Join(config.GetRuntimeDir(), "port")
 	if err := os.WriteFile(portFile, []byte(fmt.Sprintf("%d", port)), 0o644); err != nil {
 		utils.Debug("Error writing port file: %v", err)
 	}
@@ -356,7 +304,7 @@ func saveActivePort(port int) {
 
 // removeActivePort cleans up the port file on exit
 func removeActivePort() {
-	portFile := filepath.Join(config.GetSurgeDir(), "port")
+	portFile := filepath.Join(config.GetRuntimeDir(), "port")
 	if err := os.Remove(portFile); err != nil && !os.IsNotExist(err) {
 		utils.Debug("Error removing port file: %v", err)
 	}
@@ -426,7 +374,7 @@ func startHTTPServer(ln net.Listener, port int, defaultOutputDir string, service
 				// Determine event type name based on struct
 				// Events are in internal/engine/events package
 				eventType := "unknown"
-				switch msg.(type) {
+				switch msg := msg.(type) {
 				case events.DownloadStartedMsg:
 					eventType = "started"
 				case events.DownloadCompleteMsg:
@@ -445,6 +393,15 @@ func startHTTPServer(ln net.Listener, port int, defaultOutputDir string, service
 					eventType = "removed"
 				case events.DownloadRequestMsg:
 					eventType = "request"
+				case events.BatchProgressMsg:
+					// Unroll batch and send individual progress events
+					for _, p := range msg {
+						data, _ := json.Marshal(p)
+						_, _ = fmt.Fprintf(w, "event: progress\n")
+						_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+					}
+					flusher.Flush()
+					continue // Skip default send
 				}
 
 				// SSE Format:
@@ -584,7 +541,8 @@ func corsMiddleware(next http.Handler) http.Handler {
 		// Set CORS headers
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS, PUT, PATCH")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Access-Control-Allow-Private-Network")
+		w.Header().Set("Access-Control-Allow-Private-Network", "true")
 
 		// Handle preflight requests
 		if r.Method == "OPTIONS" {
@@ -627,7 +585,7 @@ func authMiddleware(token string, next http.Handler) http.Handler {
 }
 
 func ensureAuthToken() string {
-	tokenFile := filepath.Join(config.GetSurgeDir(), "token")
+	tokenFile := filepath.Join(config.GetStateDir(), "token")
 	data, err := os.ReadFile(tokenFile)
 	if err == nil {
 		return strings.TrimSpace(string(data))
@@ -635,6 +593,11 @@ func ensureAuthToken() string {
 
 	// Generate new token
 	token := uuid.New().String()
+
+	// Ensure directory exists
+	if err := os.MkdirAll(filepath.Dir(tokenFile), 0755); err != nil {
+		utils.Debug("Failed to create token directory: %v", err)
+	}
 	if err := os.WriteFile(tokenFile, []byte(token), 0600); err != nil {
 		utils.Debug("Failed to write token file: %v", err)
 	}
@@ -876,7 +839,6 @@ func processDownloads(urls []string, outputDir string, port int) int {
 	successCount := 0
 
 	// If port > 0, we are sending to a remote server
-	// If port > 0, we are sending to a remote server
 	if port > 0 {
 		for _, arg := range urls {
 			url, mirrors := ParseURLArg(arg)
@@ -954,16 +916,22 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
 	rootCmd.Flags().StringP("batch", "b", "", "File containing URLs to download (one per line)")
 	rootCmd.Flags().IntP("port", "p", 0, "Port to listen on (default: 8080 or first available)")
 	rootCmd.Flags().StringP("output", "o", "", "Default output directory")
 	rootCmd.Flags().Bool("no-resume", false, "Do not auto-resume paused downloads on startup")
 	rootCmd.Flags().Bool("exit-when-done", false, "Exit when all downloads complete")
-	rootCmd.SetVersionTemplate("Surge version {{.Version}}\n")
+	rootCmd.SetVersionTemplate("Surge v{{.Version}}\n")
 }
 
 // initializeGlobalState sets up the environment and configures the engine state and logging
 func initializeGlobalState() {
+	// Attempt migration first (Linux only)
+	if err := config.MigrateOldPaths(); err != nil {
+		fmt.Fprintf(os.Stderr, "Migration warning: %v\n", err)
+	}
+
 	stateDir := config.GetStateDir()
 	logsDir := config.GetLogsDir()
 
